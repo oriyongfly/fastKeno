@@ -13,19 +13,11 @@ import { drawNumbers } from '../utils/drawEngine';
 import { settleTickets } from '../utils/payoutCalculator';
 import { formatTime, formatETB } from '../utils/formatters';
 
-/**
- * Central game store.
- *
- * Everything that multiple hooks/components need to share lives here:
- *   - balance
- *   - selectedNumbers
- *   - drawnNumbers
- *   - isDrawing
- *   - betAmount
- *
- * Plus the actions that mutate them. Hooks like `useTickets` and
- * `useGameTimer` become thin adapters on top of this store.
- */
+// Timing for the three-phase BET button feedback (ms).
+// "idle" -> "wait" -> "accepted" -> "idle"
+export const BET_WAIT_MS = 450;
+export const BET_ACCEPTED_MS = 600;
+
 export const useGameStore = create((set, get) => ({
   // ─────────────────────────────────────────────
   // State
@@ -38,6 +30,9 @@ export const useGameStore = create((set, get) => ({
   activeTickets: [],
   gameHistory: [],
   timer: DRAW_INTERVAL_SECONDS,
+
+  // Three-phase BET button feedback: "idle" | "wait" | "accepted"
+  betState: 'idle',
 
   // Optional: a notify function the UI can register so actions can
   // surface messages (toasts) without importing React.
@@ -106,9 +101,14 @@ export const useGameStore = create((set, get) => ({
   /**
    * Validate, deduct, and record a new ticket.
    *
-   * On success, the live selection is cleared — the ticket holds its
+   * On success the live selection is cleared — the ticket holds its
    * own defensive copy of the picks, so the grid resets to default
    * immediately after the bet is placed.
+   *
+   * The BET button cycles through three visual phases on success:
+   *   "idle" -> "wait" (immediately)
+   *          -> "accepted" (after BET_WAIT_MS)
+   *          -> "idle" (after another BET_ACCEPTED_MS)
    *
    * @returns {{ ok: boolean, reason?: string, ticket?: Object }}
    */
@@ -162,8 +162,23 @@ export const useGameStore = create((set, get) => ({
     set({
       balance: balance - betAmount,
       activeTickets: [ticket, ...activeTickets],
-      selectedNumbers: [],        // ← the fix: reset the grid on success
+      selectedNumbers: [],        // ← reset the grid on success
+      betState: 'wait',           // ← phase 1: pending
     });
+
+    // ── Three-phase button feedback ────────────
+    // Phase 2: accepted
+    setTimeout(() => {
+      // Guard against a reset that happened in the meantime.
+      if (get().betState !== 'wait') return;
+      set({ betState: 'accepted' });
+    }, BET_WAIT_MS);
+
+    // Phase 3: back to idle
+    setTimeout(() => {
+      if (get().betState !== 'accepted') return;
+      set({ betState: 'idle' });
+    }, BET_WAIT_MS + BET_ACCEPTED_MS);
 
     _notify?.(`Bet of ${formatETB(betAmount)} placed successfully!`);
     return { ok: true, ticket };
@@ -235,5 +250,6 @@ export const useGameStore = create((set, get) => ({
       activeTickets: [],
       gameHistory: [],
       timer: DRAW_INTERVAL_SECONDS,
+      betState: 'idle',           // ← don't leave the button stuck
     }),
 }));

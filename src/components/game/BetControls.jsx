@@ -6,13 +6,24 @@ import { BET } from '../../constants/gameConfig';
 /**
  * Bet controls: - / value / + / x2 / max, plus the primary BET button.
  *
- * Stateless. The parent owns `betAmount`, `balance`, and all clamping
- * logic (including the max-bet edge case — see `handleMaxBet` notes).
+ * Stateless. The parent owns `betAmount`, `balance`, `betState`, and all
+ * clamping logic (including the max-bet edge case — see `handleMaxBet` notes).
+ *
+ * The primary button cycles through three visual phases, mirroring
+ * `BetButton` in FastKeno.jsx:
+ *
+ *   "idle"      → BET            (disabled if unaffordable or drawing)
+ *   "wait"      → WAIT...        (button locked)
+ *   "accepted"  → ✓ BET ACCEPTED (button locked)
+ *
+ * The store's `placeBet` drives the phase transitions; this component
+ * only renders what it's told.
  *
  * @param {Object}   props
  * @param {number}   props.betAmount
  * @param {number}   props.balance
  * @param {boolean}  props.isDrawing
+ * @param {string}   [props.betState="idle"] - "idle" | "wait" | "accepted"
  * @param {Function} props.onDecrement
  * @param {Function} props.onIncrement
  * @param {Function} props.onMultiply     - called with the multiplier (e.g. 2)
@@ -25,6 +36,7 @@ export default function BetControls({
   betAmount,
   balance,
   isDrawing,
+  betState = 'idle',
   onDecrement,
   onIncrement,
   onMultiply,
@@ -38,9 +50,20 @@ export default function BetControls({
   // doesn't need to change.
   const multiplierButtons = Array.isArray(multipliers) ? multipliers : [];
 
-  // Disable BET when drawing OR when the player can't afford the current bet.
+  // Stake row is locked while drawing or while the button is animating.
+  const stakeLocked = isDrawing || betState !== 'idle';
+
+  // BET is disabled when:
+  //   - a round is in progress,
+  //   - the player can't afford the current bet,
+  //   - the button is mid-feedback ("wait" / "accepted").
   const canAfford = Number.isFinite(balance) && balance >= betAmount;
-  const betDisabled = isDrawing || !canAfford;
+  const betDisabled = isDrawing || !canAfford || betState !== 'idle';
+
+  // FastKeno's lit/dim rule: the button lights up whenever it's not
+  // sitting idle-and-unaffordable. `wait` and `accepted` stay lit so the
+  // state change reads as a colour swap, not a flicker to disabled grey.
+  const lit = betState !== 'idle' || (!betDisabled && canAfford);
 
   return (
     <div className={`space-y-2 pt-1 ${className}`}>
@@ -49,7 +72,7 @@ export default function BetControls({
         <StepButton
           label="−"
           onClick={onDecrement}
-          disabled={isDrawing}
+          disabled={stakeLocked}
           aria-label="Decrease bet"
           className="flex-1 py-2.5 text-lg"
         >
@@ -69,7 +92,7 @@ export default function BetControls({
         <StepButton
           label="+"
           onClick={onIncrement}
-          disabled={isDrawing}
+          disabled={stakeLocked}
           aria-label="Increase bet"
           className="flex-1 py-2.5 text-lg"
         >
@@ -82,7 +105,7 @@ export default function BetControls({
             key={m}
             label={`x${m}`}
             onClick={() => onMultiply(m)}
-            disabled={isDrawing}
+            disabled={stakeLocked}
             aria-label={`Multiply bet by ${m}`}
             className="flex-1 py-2.5 text-xs"
           >
@@ -94,7 +117,7 @@ export default function BetControls({
         <StepButton
           label="max"
           onClick={onMax}
-          disabled={isDrawing}
+          disabled={stakeLocked}
           aria-label="Set maximum bet"
           className="flex-1 py-2.5 text-xs"
         >
@@ -102,15 +125,52 @@ export default function BetControls({
         </StepButton>
       </div>
 
-      {/* ── Main BET button ── */}
+      {/* ── Main BET button (three-phase, mirrors FastKeno's BetButton) ── */}
       <button
         type="button"
         onClick={onPlaceBet}
         disabled={betDisabled}
-        aria-label={`Place bet of ${betAmount}`}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black tracking-wider text-base py-3.5 rounded-lg shadow-lg shadow-emerald-950/50 border border-emerald-400/40 transition transform active:scale-[0.99] flex items-center justify-center gap-2"
+        aria-label={
+          betState === 'wait'
+            ? 'Placing bet'
+            : betState === 'accepted'
+            ? 'Bet accepted'
+            : `Place bet of ${betAmount}`
+        }
+        aria-live="polite"
+        className={[
+          'w-full flex items-center justify-center gap-2 rounded-lg',
+          'font-black tracking-wider border',
+          'transition-colors duration-150 motion-reduce:transition-none',
+          'disabled:cursor-not-allowed',
+          // sizing: "wait" is base-size, idle/accepted are the big label
+          betState === 'wait' ? 'text-base' : 'text-xl',
+          'h-12',
+          lit
+            ? 'bg-emerald-700 text-white border-emerald-400/40'
+            : 'bg-emerald-950/70 text-zinc-500 border-emerald-900/60',
+        ].join(' ')}
       >
-        BET
+        {betState === 'wait' && 'WAIT...'}
+
+        {betState === 'accepted' && (
+          <>
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5 fill-none stroke-white stroke-[3]"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 12l5 5L20 6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="text-base">BET ACCEPTED</span>
+          </>
+        )}
+
+        {betState === 'idle' && 'BET'}
       </button>
     </div>
   );

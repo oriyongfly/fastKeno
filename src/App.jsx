@@ -1,9 +1,15 @@
 // App.jsx
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // ── Config ─────────────────────────────────────
-import { NUMBERS_DRAWN, DRAW_ANIMATION_MS, GRID_SIZE, MAX_PICKS } from './constants/gameConfig';
+import {
+  NUMBERS_DRAWN,
+  DRAW_ANIMATION_MS,
+  DRAW_INTERVAL_SECONDS,
+  GRID_SIZE,
+  MAX_PICKS,
+} from './constants/gameConfig';
 
 // ── Store ──────────────────────────────────────
 import { useGameStore } from './store/useGameStore';
@@ -22,7 +28,8 @@ import SubHeader from './components/layout/SubHeader';
 
 // ── Game ───────────────────────────────────────
 import RadarDisplay from './components/game/RadarDisplay';
-import PicksCounter from './components/game/PicksCounter';
+import TimerPill from './components/game/TimerPill';
+import InfoPanels from './components/game/InfoPanels';
 import NumberGrid from './components/game/NumberGrid';
 import BetControls from './components/game/BetControls';
 
@@ -36,6 +43,7 @@ import LeadersTab from './components/tabs/LeadersTab';
 
 // ── UI ─────────────────────────────────────────
 import Toast from './components/ui/Toast';
+import ViewSwap from './components/ui/ViewSwap';
 
 /**
  * App shell.
@@ -43,6 +51,17 @@ import Toast from './components/ui/Toast';
  * Reads game state from the Zustand store, wires the timer hook to the
  * draw sequence, and renders the layout. All game rules live in the
  * store and utilities — this file is pure composition.
+ *
+ * Changes applied:
+ *   1. betState read from store, passed to BetControls.
+ *   3. NumberGrid receives hotNumbers / coldNumbers (empty for now).
+ *   4. InfoPanels replaces PicksCounter.
+ *   5. ViewSwap wraps the game area, keyed on `round`.
+ *   6. `round` bumps inside runDraw, at draw start.
+ *   7. TimerPill extracted, rendered between RadarDisplay and InfoPanels.
+ *  12. InfoPanels + NumberGrid + BetControls hidden while isDrawing.
+ *  14. pickedNumbers derived from activeTickets, passed to RadarDisplay
+ *      so hit balls light up green in the draw stage.
  */
 export default function App() {
   // ── Store slices ───────────────────────────
@@ -53,6 +72,7 @@ export default function App() {
   const betAmount       = useGameStore((s) => s.betAmount);
   const activeTickets   = useGameStore((s) => s.activeTickets);
   const gameHistory     = useGameStore((s) => s.gameHistory);
+  const betState        = useGameStore((s) => s.betState);
 
   // ── Store actions ──────────────────────────
   const toggleNumber     = useGameStore((s) => s.toggleNumber);
@@ -69,6 +89,11 @@ export default function App() {
 
   // ── Local UI state (not shared) ────────────
   const [activeTab, setActiveTab] = useState('Game');
+
+  // Round counter drives <ViewSwap key={round}>. Bumped once per draw
+  // cycle (inside runDraw, right after startDraw) so the whole game
+  // area fades in when a new draw begins.
+  const [round, setRound] = useState(0);
 
   // ── Toast ──────────────────────────────────
   const toast = useToast(3000);
@@ -121,6 +146,10 @@ export default function App() {
     const drawn = drawNumbers(NUMBERS_DRAWN, GRID_SIZE);
     startDraw();
 
+    // Start a new "round" for the ViewSwap fade — this is the moment
+    // the game area transitions from betting to drawing.
+    setRound((r) => r + 1);
+
     drawn.forEach((num, i) => {
       const id = setTimeout(() => {
         revealNumber(num);
@@ -146,7 +175,7 @@ export default function App() {
 
   // ── Timer ──────────────────────────────────
   const { timer } = useGameTimer({
-    duration: 60,
+    duration: DRAW_INTERVAL_SECONDS,
     onComplete: runDraw,
     // Pause countdown while the reveal animation is running so every
     // round gets a full 60 s of betting.
@@ -181,6 +210,14 @@ export default function App() {
   }, [placeBet, playSound]);
 
   // ── Derived ────────────────────────────────
+  // All numbers currently on active tickets — used to highlight hits
+  // in the draw stage. Flattened across every live ticket; RadarDisplay
+  // dedupes via its internal Set.
+  const pickedNumbers = useMemo(
+    () => activeTickets.flatMap((t) => t.picks),
+    [activeTickets]
+  );
+
   // The cell that should render with the "latest draw" inset ring.
   // null before any draw, so NumberGrid receives a stable, safe value.
   const latestNumber =
@@ -215,41 +252,62 @@ export default function App() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
 
-          {/* Radar / countdown */}
-          <RadarDisplay
-            isDrawing={isDrawing}
-            timer={timer}
-            drawnNumbers={drawnNumbers}
-          />
+          {/* ── Game area: fades in on each new round ── */}
+          <ViewSwap key={round}>
+            {/* Radar / draw stage — always visible.
+                During the draw this is the whole show. */}
+            <RadarDisplay
+              isDrawing={isDrawing}
+              drawnNumbers={drawnNumbers}
+              pickedNumbers={pickedNumbers}
+            />
 
-          {/* Picks summary */}
-          <PicksCounter
-            selectedNumbers={selectedNumbers}
-            maxPicks={MAX_PICKS}
-          />
+            {/* Countdown pill — kept outside the draw-conditional so the
+                player never loses sight of the clock. The timer hook is
+                `paused: isDrawing`, so it freezes (not resets) during the
+                draw and resumes when betting reopens. */}
+            <TimerPill timer={timer} />
 
-          {/* 80-cell board */}
-          <NumberGrid
-            selectedNumbers={selectedNumbers}
-            drawnNumbers={drawnNumbers}
-            latestNumber={latestNumber}
-            isDrawing={isDrawing}
-            onNumberClick={handleNumberClick}
-          />
+            {/* Betting UI — hidden while a round is running.
+                Picks are locked anyway (toggleNumber early-returns when
+                isDrawing), so hiding the grid doesn't change behaviour —
+                only the visuals. */}
+            {!isDrawing && (
+              <>
+                {/* Hint panel: choose ↔ pay-table slide */}
+                <InfoPanels
+                  picks={selectedNumbers}
+                  betState={betState}
+                />
 
-          {/* Bet sizing + BET button */}
-          <BetControls
-            betAmount={betAmount}
-            balance={balance}
-            isDrawing={isDrawing}
-            onDecrement={() => changeBet(-1)}
-            onIncrement={() => changeBet(1)}
-            onMultiply={multiplyBet}
-            onMax={maxBet}
-            onPlaceBet={handlePlaceBet}
-          />
+                {/* 80-cell board */}
+                <NumberGrid
+                  selectedNumbers={selectedNumbers}
+                  drawnNumbers={drawnNumbers}
+                  latestNumber={latestNumber}
+                  isDrawing={isDrawing}
+                  onNumberClick={handleNumberClick}
+                  hotNumbers={[]}
+                  coldNumbers={[]}
+                />
 
-          {/* Tabs */}
+                {/* Bet sizing + BET button (three-phase) */}
+                <BetControls
+                  betAmount={betAmount}
+                  balance={balance}
+                  isDrawing={isDrawing}
+                  betState={betState}
+                  onDecrement={() => changeBet(-1)}
+                  onIncrement={() => changeBet(1)}
+                  onMultiply={multiplyBet}
+                  onMax={maxBet}
+                  onPlaceBet={handlePlaceBet}
+                />
+              </>
+            )}
+          </ViewSwap>
+
+          {/* Tabs — always visible */}
           <div className="pt-2">
             <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
@@ -259,11 +317,14 @@ export default function App() {
               aria-labelledby={`tab-${activeTab}`}
               className="bg-[#101622] p-3 rounded-b-lg border-x border-b border-slate-800 min-h-[90px]"
             >
-              {activeTab === 'Game' && (
-                <GameTab
-                  activeTickets={activeTickets}
-                  gameHistory={gameHistory}
-                />
+          {activeTab === 'Game' && (
+            <GameTab
+              activeTickets={activeTickets}
+              gameHistory={gameHistory}
+              drawnNumbers={drawnNumbers}
+              isDrawing={isDrawing}
+            />
+
               )}
               {activeTab === 'History' && (
                 <HistoryTab gameHistory={gameHistory} />
