@@ -3,17 +3,18 @@
 import React from 'react';
 import { formatCountdown } from '../../utils/formatters';
 
-// How many recent balls the strip shows. Fixed so empty slots can
-// pad the row on the first few reveals.
-const RECENT_SLOTS = 9;
+// Maximum number of drawn numbers we render in the strip.
+// Keeps the UI bounded — the game never reveals more than 20.
+const MAX_BALLS = 20;
 
 /**
  * Radar screen.
  *
  * Idle:   countdown clock (HH:MM)
  * Drawing / settled:
- *   - Large "current number" ball (last drawn)
- *   - 9-slot strip of the most recent numbers, newest first
+ *   - Large "current number" ball (last drawn) in the top-right
+ *   - Wrapping grid of the most recent numbers (up to 20),
+ *     newest first, flowing right-to-left with new rows on top
  *
  * All state is derived from `drawnNumbers` — no internal hooks,
  * no timers, no side effects. Safe on an empty array.
@@ -32,22 +33,21 @@ export default function RadarDisplay({
 }) {
   const showDrawView = isDrawing || drawnNumbers.length > 0;
 
+  const hasNumbers = Array.isArray(drawnNumbers) && drawnNumbers.length > 0;
+
   // Derived values. Both are null / empty-safe.
-  const currentNumber =
-    Array.isArray(drawnNumbers) && drawnNumbers.length > 0
-      ? drawnNumbers[drawnNumbers.length - 1]
-      : null;
+  const currentNumber = hasNumbers
+    ? drawnNumbers[drawnNumbers.length - 1]
+    : null;
 
-  const recentNumbers =
-    Array.isArray(drawnNumbers) && drawnNumbers.length > 0
-      ? drawnNumbers.slice(-RECENT_SLOTS).reverse()
-      : [];
-
-  const emptySlots = Math.max(0, RECENT_SLOTS - recentNumbers.length);
+  // Newest first, capped at MAX_BALLS.
+  const recentNumbers = hasNumbers
+    ? drawnNumbers.slice(-MAX_BALLS).reverse()
+    : [];
 
   return (
     <div
-      className={`relative h-36 bg-[#090d16] rounded-xl border border-slate-800 flex flex-col items-center justify-center overflow-hidden shadow-inner ${className}`}
+      className={`relative h-auto min-h-[144px] bg-[#090d16] rounded-xl border border-slate-800 flex flex-col items-center justify-center overflow-hidden shadow-inner ${className}`}
     >
       <RadarRings />
 
@@ -55,7 +55,6 @@ export default function RadarDisplay({
         <DrawStage
           currentNumber={currentNumber}
           recentNumbers={recentNumbers}
-          emptySlots={emptySlots}
         />
       ) : (
         <ClockView timer={timer} />
@@ -98,32 +97,42 @@ function ClockView({ timer }) {
   );
 }
 
-function DrawStage({ currentNumber, recentNumbers, emptySlots }) {
+function DrawStage({ currentNumber, recentNumbers }) {
   return (
-    <div className="relative z-10 w-full h-full">
-      {/* Current number — large ball, right-center */}
-      {currentNumber !== null && (
-        <div
-          className="absolute right-[21%] top-[30px] w-[60px] h-[60px] rounded-full grid place-items-center border-2 border-slate-500/70 text-slate-50 text-3xl font-extrabold tabular-nums"
-          style={{
-            background:
-              'radial-gradient(circle at 35% 22%, #607985, #15252e 68%)',
-            boxShadow:
-              'inset 0 3px 5px rgba(255,255,255,0.17), 0 4px 8px rgba(0,0,0,0.4)',
-          }}
-          aria-label={`Current number ${currentNumber}`}
-        >
-          {currentNumber}
-        </div>
-      )}
+    <div className="relative z-10 w-full px-3 pt-2 pb-3">
+      {/* Current number — large ball, top-right.
+          Kept in normal flow via a spacer row so it never overlaps
+          the ball grid below. */}
+      <div className="flex items-start justify-end h-[68px] pr-[14%]">
+        {currentNumber !== null && (
+          <div
+            className="w-[60px] h-[60px] rounded-full grid place-items-center border-2 border-slate-500/70 text-slate-50 text-3xl font-extrabold tabular-nums"
+            style={{
+              background:
+                'radial-gradient(circle at 35% 22%, #607985, #15252e 68%)',
+              boxShadow:
+                'inset 0 3px 5px rgba(255,255,255,0.17), 0 4px 8px rgba(0,0,0,0.4)',
+            }}
+            aria-label={`Current number ${currentNumber}`}
+          >
+            {currentNumber}
+          </div>
+        )}
+      </div>
 
-      {/* 9-slot recent strip — pinned to the bottom of the stage */}
-      <div className="absolute inset-x-0 bottom-5 flex items-center justify-center gap-[clamp(6px,2vw,20px)]">
+      {/* Wrapping ball grid.
+          flex-row-reverse + flex-wrap-reverse:
+            - newest ball sits at the right edge of the bottom row
+            - subsequent balls flow leftward
+            - once a row fills, the next row appears above it
+          This keeps the visual anchor (newest) at the bottom-right and
+          lets older draws scroll upward, matching the original strip. */}
+      <div
+        className="flex flex-row-reverse flex-wrap-reverse items-center justify-start gap-[clamp(6px,2vw,20px)]"
+        aria-label="Recent drawn numbers"
+      >
         {recentNumbers.map((num, index) => (
           <RecentBall key={`${num}-${index}`} num={num} latest={index === 0} />
-        ))}
-        {Array.from({ length: emptySlots }, (_, index) => (
-          <EmptyBall key={`empty-${index}`} />
         ))}
       </div>
     </div>
@@ -145,24 +154,6 @@ function RecentBall({ num, latest }) {
       }}
     >
       {num}
-    </span>
-  );
-}
-
-function EmptyBall() {
-  return (
-    <span
-      className="shrink-0 w-9 h-9 rounded-full grid place-items-center text-slate-400/70 text-lg font-extrabold border-2"
-      style={{
-        background:
-          'radial-gradient(circle at 35% 22%, #425f6b, #0b1720 65%)',
-        borderColor: '#4b646c',
-        boxShadow:
-          'inset 0 2px 3px rgba(255,255,255,0.14), 0 2px 3px rgba(0,0,0,0.4)',
-      }}
-      aria-hidden="true"
-    >
-      –
     </span>
   );
 }

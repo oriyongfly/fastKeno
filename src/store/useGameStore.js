@@ -105,6 +105,11 @@ export const useGameStore = create((set, get) => ({
   // ─────────────────────────────────────────────
   /**
    * Validate, deduct, and record a new ticket.
+   *
+   * On success, the live selection is cleared — the ticket holds its
+   * own defensive copy of the picks, so the grid resets to default
+   * immediately after the bet is placed.
+   *
    * @returns {{ ok: boolean, reason?: string, ticket?: Object }}
    */
   placeBet: () => {
@@ -117,6 +122,8 @@ export const useGameStore = create((set, get) => ({
       _notify,
     } = get();
 
+    // ── Validation ─────────────────────────────
+    // Any early return leaves selectedNumbers untouched.
     if (isDrawing) return { ok: false, reason: 'Round in progress.' };
 
     if (selectedNumbers.length < MIN_PICKS) {
@@ -140,6 +147,9 @@ export const useGameStore = create((set, get) => ({
       return { ok: false, reason };
     }
 
+    // ── Ticket construction ────────────────────
+    // Defensive copy: clearing `selectedNumbers` below must not affect
+    // the picks stored on the ticket.
     const ticket = {
       id: Date.now(),
       picks: [...selectedNumbers],
@@ -148,9 +158,11 @@ export const useGameStore = create((set, get) => ({
       status: 'Pending',
     };
 
+    // ── Commit ─────────────────────────────────
     set({
       balance: balance - betAmount,
       activeTickets: [ticket, ...activeTickets],
+      selectedNumbers: [],        // ← the fix: reset the grid on success
     });
 
     _notify?.(`Bet of ${formatETB(betAmount)} placed successfully!`);
