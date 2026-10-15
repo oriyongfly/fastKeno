@@ -1,252 +1,192 @@
-import React, { useEffect, useRef, useState } from "react";
-
-/**
- * FastKeno.jsx
- * A self-contained React recreation of the supplied Fast Keno screen.
- *
- * DRAW ALGORITHM:
- * - A round draws 20 unique numbers from 1..80.
- * - Each draw uses crypto.getRandomValues() when available.
- * - Rejection sampling avoids modulo bias.
- * - The draw is a client-side demo only. Do NOT use client-side randomness
- *   as the trusted result source for real-money gambling. Generate and audit
- *   results on a secure backend instead.
- */
-
-const MIN_NUMBER = 1;
-const MAX_NUMBER = 80;
-const DRAW_COUNT = 20;
-const DRAW_INTERVAL_MS = 650;
-const ROUND_SECONDS = 20;
-
-function secureRandomInt(min, max) {
-  const range = max - min + 1;
-
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    // Uniform integer sampling by rejecting values in the modulo-bias tail.
-    const uint32Range = 0x100000000;
-    const limit = uint32Range - (uint32Range % range);
-    const buffer = new Uint32Array(1);
-    let value;
-    do {
-      crypto.getRandomValues(buffer);
-      value = buffer[0];
-    } while (value >= limit);
-    return min + (value % range);
-  }
-
-  // Fallback for local demos in older environments. Backend randomness is
-  // required for production games.
-  return min + Math.floor(Math.random() * range);
-}
-
-function drawUniqueNumbers(count = DRAW_COUNT, min = MIN_NUMBER, max = MAX_NUMBER) {
-  if (count > max - min + 1) {
-    throw new Error("Cannot draw more unique numbers than the range contains.");
-  }
-
-  // Partial Fisher-Yates shuffle: O(count) time, no duplicates.
-  const pool = Array.from({ length: max - min + 1 }, (_, i) => min + i);
-  for (let i = 0; i < count; i += 1) {
-    const j = i + secureRandomInt(0, pool.length - i - 1);
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, count);
-}
-
-function KenoBall({ number, active, latest }) {
-  return (
-    <div className={`keno-ball ${active ? "is-hit" : ""} ${latest ? "is-latest" : ""}`}>
-      {number}
+import React, { useState, useEffect } from 'react'; import { Zap, History, BarChart2, HelpCircle, Trophy, Volume2, User } from 'lucide-react';
+export default function FastKeno() { const [balance, setBalance] = useState(9997.00); const [ticketId] = useState('892079972'); const [activeTab, setActiveTab] = useState('game'); // 'game', 'history', 'results', 'stats' const [selectedNumbers, setSelectedNumbers] = useState([20, 30, 50, 68, 24, 34, 36, 17, 16, 38, 57, 19, 75, 22]); const [betAmount, setBetAmount] = useState(1); const [isPlaying, setIsPlaying] = useState(true); const [drawCount, setDrawCount] = useState(20); const [currentDrawnNumber, setCurrentDrawnNumber] = useState(72); const [drawnList, setDrawnList] = useState([74, 8, 39, 60, 66, 18, 23, 20, 63, 72]);
+// Toggle selection of numbers (1-80) const toggleNumber = (num) => { if (selectedNumbers.includes(num)) { setSelectedNumbers(selectedNumbers.filter(n => n !== num)); } else { if (selectedNumbers.length < 10) { setSelectedNumbers([...selectedNumbers, num]); } } };
+return ( <div className="min-h-screen bg-[#0b191e] text-white flex flex-col max-w-md mx-auto select-none font-sans">
+  {/* Top Header */}
+  <div className="bg-[#102229] px-4 py-3 flex items-center justify-between border-b border-[#1f3842]">
+    <div className="flex items-center space-x-2">
+      <div className="bg-yellow-400 p-1.5 rounded-lg text-black font-bold">
+        <Zap size={20} className="fill-current" />
+      </div>
+      <div>
+        <h1 className="font-black tracking-wider text-sm italic text-yellow-400">FAST KENO</h1>
+      </div>
     </div>
-  );
-}
 
-export default function FastKeno() {
-  const [drawnNumbers, setDrawnNumbers] = useState([]);
-  const [currentNumber, setCurrentNumber] = useState(null);
-  const [secondsLeft, setSecondsLeft] = useState(ROUND_SECONDS);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [round, setRound] = useState(1);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [drawSpeed, setDrawSpeed] = useState(DRAW_INTERVAL_MS);
-  const drawQueueRef = useRef([]);
-  const timerRef = useRef(null);
-  const countdownRef = useRef(null);
+    <div className="flex items-center space-x-3">
+      <div className="bg-[#162e38] px-3 py-1 rounded-full text-xs font-semibold border border-[#23424f] flex items-center space-x-1">
+        <span className="text-yellow-400 font-bold">{balance.toFixed(2)}</span>
+        <span className="text-gray-400 text-[10px]">DEMO</span>
+      </div>
+      <div className="bg-[#162e38] px-2.5 py-1 rounded-full text-xs text-gray-300 border border-[#23424f] flex items-center space-x-1">
+        <User size={12} className="text-gray-400" />
+        <span className="text-[11px]">{ticketId}</span>
+      </div>
+    </div>
+  </div>
 
-  const beginRound = () => {
-    window.clearInterval(timerRef.current);
-    window.clearInterval(countdownRef.current);
+  {/* Main Draw Stage / Dashboard */}
+  <div className="bg-gradient-to-b from-[#102229] to-[#0b191e] p-4 flex flex-col items-center relative border-b border-[#1f3842]">
+    <div className="absolute top-3 right-3 text-gray-400 text-xs flex items-center space-x-1">
+      <span>{drawCount} / 20</span>
+    </div>
 
-    const numbers = drawUniqueNumbers();
-    drawQueueRef.current = [...numbers];
-    setDrawnNumbers([]);
-    setCurrentNumber(null);
-    setSecondsLeft(ROUND_SECONDS);
-    setIsDrawing(true);
+    {/* Central Ball / Number Spinner Display */}
+    <div className="relative w-36 h-36 my-4 flex items-center justify-center">
+      {/* Outer Ring Animation / Glow */}
+      <div className="absolute inset-0 rounded-full border-2 border-emerald-500/30 animate-pulse"></div>
+      <div className="absolute inset-2 rounded-full border border-dashed border-emerald-500/20"></div>
+      
+      <div className="w-24 h-24 rounded-full bg-gradient-to-b from-emerald-400 to-emerald-700 flex items-center justify-center shadow-lg shadow-emerald-900/50 border-4 border-emerald-300">
+        <span className="text-4xl font-black text-white drop-shadow">{currentDrawnNumber}</span>
+      </div>
+    </div>
 
-    timerRef.current = window.setInterval(() => {
-      const next = drawQueueRef.current.shift();
-      if (next == null) {
-        window.clearInterval(timerRef.current);
-        setIsDrawing(false);
-        return;
-      }
-
-      setCurrentNumber(next);
-      setDrawnNumbers((previous) => [...previous, next]);
-
-      if (drawQueueRef.current.length === 0) {
-        window.clearInterval(timerRef.current);
-        setIsDrawing(false);
-      }
-    }, drawSpeed);
-
-    countdownRef.current = window.setInterval(() => {
-      setSecondsLeft((previous) => {
-        if (previous <= 1) {
-          window.clearInterval(countdownRef.current);
-          return 0;
-        }
-        return previous - 1;
-      });
-    }, 1000);
-  };
-
-  useEffect(() => {
-    beginRound();
-    return () => {
-      window.clearInterval(timerRef.current);
-      window.clearInterval(countdownRef.current);
-    };
-    // Start the first round only on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const numberSet = new Set(drawnNumbers);
-  const recentNumbers = [...drawnNumbers].slice(-9).reverse();
-
-  const nextRound = () => {
-    setRound((value) => value + 1);
-    beginRound();
-  };
-
-  return (
-    <main className="keno-page">
-      <style>{`
-        * { box-sizing: border-box; }
-        .keno-page {
-          min-height: 100vh; width: 100%; padding: 0 10px 24px;
-          background: #0e1115; color: #e8ecee;
-          font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-        }
-        .keno-shell {
-          width: 100%; max-width: 720px; min-height: calc(100vh - 48px);
-          margin: 48px auto 0; padding: 8px 4px 30px; overflow: hidden;
-          background: radial-gradient(ellipse at 50% 18%, #173c35 0%, #1a2020 34%, #191e20 65%);
-          border-top: 1px solid #263133; position: relative;
-        }
-        .keno-header { height: 38px; display:flex; align-items:center; justify-content:center; position:relative; }
-        .keno-logo { font-size: clamp(20px, 4vw, 27px); font-weight: 950; font-style:italic; letter-spacing:-1.5px; }
-        .keno-logo span:first-child { color:#e7edf0; text-shadow: 1px 1px #72818a; }
-        .keno-logo span:last-child { color:#43b77b; }
-        .keno-menu { position:absolute; right:5px; top:2px; border:0; background:transparent; color:#59c98c; font-size:25px; cursor:pointer; line-height:1; }
-        .keno-menu-panel { position:absolute; z-index:5; right:4px; top:34px; padding:10px; background:#101719; border:1px solid #344348; border-radius:8px; display:flex; flex-direction:column; gap:8px; }
-        .keno-menu-panel button { color:#e6eeee; background:#253033; border:0; border-radius:5px; padding:8px 12px; cursor:pointer; }
-        .keno-status { height:43px; display:flex; align-items:center; justify-content:flex-end; gap:9px; padding:0 10px; font-family:monospace; font-size:24px; font-weight:800; }
-        .keno-slash { color:#49c184; font-size:27px; }
-        .keno-stage { height:166px; position:relative; display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:22px; }
-        .keno-rings { position:absolute; inset:-20px 8% 0; overflow:hidden; opacity:.45; pointer-events:none; }
-        .keno-rings i { position:absolute; left:50%; top:18px; border:4px solid transparent; border-top-color:#275447; border-left-color:#275447; border-radius:50%; transform:translateX(-50%) rotate(25deg); }
-        .keno-rings i:nth-child(1) { width:95px;height:95px; }
-        .keno-rings i:nth-child(2) { width:155px;height:155px;top:2px; }
-        .keno-rings i:nth-child(3) { width:215px;height:215px;top:-16px; }
-        .keno-rings i:nth-child(4) { width:275px;height:275px;top:-34px; }
-        .keno-rings i:nth-child(5) { width:335px;height:335px;top:-52px; }
-        .keno-current { position:absolute; right:21%; top:30px; width:60px; height:60px; border-radius:50%; display:grid; place-items:center; background:linear-gradient(#607985,#15252e 68%); border:2px solid #72838a; box-shadow:inset 0 3px 5px #ffffff2b, 0 4px 8px #0006; color:#f4f5f5; font-size:29px; font-weight:800; z-index:2; }
-        .keno-recent { position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:clamp(7px, 2.4vw, 24px); }
-        .keno-ball { flex:0 0 auto; width:36px; height:36px; display:grid; place-items:center; border-radius:50%; color:#e9eff1; font-size:18px; font-weight:800; background:radial-gradient(circle at 35% 22%, #425f6b, #0b1720 65%); border:2px solid #4b646c; box-shadow:inset 0 2px 3px #ffffff24, 0 2px 3px #0006; }
-        .keno-ball.is-hit { background:radial-gradient(circle at 35% 20%, #47dfaa, #006e4e 65%, #033d32); border-color:#368a6d; }
-        .keno-ball.is-latest { transform:translateY(-2px); }
-        .keno-grid { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); gap:3px; }
-        .keno-cell { min-width:0; aspect-ratio:1.04; display:grid; place-items:center; border-radius:3px; background:linear-gradient(145deg,#2c3539,#242b2f); color:#777d80; font-size:clamp(14px, 3.6vw, 25px); font-weight:800; position:relative; }
-        .keno-cell.hit { color:#d9e4de; background:#438d65; }
-        .keno-cell.latest { box-shadow:inset 0 0 0 2px #78d6a0; }
-        .keno-cell .dot { position:absolute; width:7px;height:7px;border-radius:50%;top:2px;left:3px;background:#58a6c0; }
-        .keno-cell:nth-child(16n + 7) .dot, .keno-cell:nth-child(19n + 2) .dot { background:#c34a52; }
-        .keno-controls { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:18px 0 0; }
-        .keno-controls button { border:1px solid #38534a; background:#1e332c; color:#dce9e2; border-radius:6px; padding:9px 14px; font-weight:700; cursor:pointer; }
-        .keno-controls button:disabled { opacity:.45; cursor:default; }
-        .keno-note { text-align:center; color:#84918e; font-size:11px; margin:12px 8px 0; line-height:1.5; }
-        @media (max-width:420px) {
-          .keno-page { padding:0 6px 16px; }
-          .keno-shell { margin-top:24px; }
-          .keno-stage { height:156px; }
-          .keno-ball { width:clamp(27px, 7.7vw, 36px); height:clamp(27px, 7.7vw, 36px); font-size:clamp(13px, 3.8vw, 18px); border-width:1px; }
-          .keno-recent { gap:clamp(4px, 1.7vw, 8px); }
-          .keno-current { right:21%; width:54px; height:54px; font-size:26px; }
-          .keno-cell { aspect-ratio:1; }
-        }
-      `}</style>
-
-      <section className="keno-shell">
-        <header className="keno-header">
-          <div className="keno-logo"><span>FAST</span><span>KENO</span></div>
-          <button className="keno-menu" aria-label="Open menu" onClick={() => setMenuOpen((v) => !v)}>☰</button>
-          {menuOpen && (
-            <div className="keno-menu-panel">
-              <button onClick={nextRound}>New round</button>
-              <button onClick={() => setDrawSpeed((v) => v === 650 ? 250 : 650)}>
-                Draw speed: {drawSpeed === 650 ? "Normal" : "Fast"}
-              </button>
-            </div>
-          )}
-        </header>
-
-        <div className="keno-status" aria-label="Round countdown">
-          <span>{String(secondsLeft).padStart(2, "0")}</span>
-          <span className="keno-slash">/</span>
-          <span>{String(ROUND_SECONDS).padStart(2, "0")}</span>
+    {/* Drawn Numbers Bar */}
+    <div className="w-full overflow-x-auto py-2 flex space-x-2 scrollbar-none justify-start px-2">
+      {drawnList.map((num, idx) => (
+        <div 
+          key={idx} 
+          className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+            selectedNumbers.includes(num) 
+              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/40 ring-2 ring-emerald-300' 
+              : 'bg-[#1b343e] text-gray-300 border border-[#294c5a]'
+          }`}
+        >
+          {num}
         </div>
+      ))}
+    </div>
+  </div>
 
-        <section className="keno-stage" aria-label="Latest drawn numbers">
-          <div className="keno-rings" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-          {currentNumber !== null && <div className="keno-current">{currentNumber}</div>}
-          <div className="keno-recent">
-            {recentNumbers.map((number, index) => (
-              <KenoBall key={number} number={number} active={true} latest={index === 0} />
-            ))}
-            {Array.from({ length: Math.max(0, 9 - recentNumbers.length) }, (_, index) => (
-              <KenoBall key={`empty-${index}`} number="–" active={false} latest={false} />
-            ))}
+  {/* Navigation Sub-Tabs */}
+  <div className="bg-[#0e1f26] grid grid-cols-4 text-center border-b border-[#1b343e] text-xs font-semibold">
+    <button 
+      onClick={() => setActiveTab('game')}
+ className={`py-3 flex items-center justify-center space-x-1 border-b-2 ${activeTab === 'game' ? 'border-emerald-400 text-emerald-400 bg-[#142b34]' : 'border-transparent text-gray-400'}`}
+    >
+      <Zap size={14} />
+      <span>GAME</span>
+    </button>
+    <button 
+      onClick={() => setActiveTab('history')}
+      className={`py-3 flex items-center justify-center space-x-1 border-b-2 ${activeTab === 'history' ? 'border-emerald-400 text-emerald-400 bg-[#142b34]' : 'border-transparent text-gray-400'}`}
+    >
+      <History size={14} />
+      <span>HISTORY</span>
+    </button>
+    <button 
+      onClick={() => setActiveTab('results')}
+      className={`py-3 flex items-center justify-center space-x-1 border-b-2 ${activeTab === 'results' ? 'border-emerald-400 text-emerald-400 bg-[#142b34]' : 'border-transparent text-gray-400'}`}
+    >
+      <Trophy size={14} />
+      <span>RESULTS</span>
+    </button>
+    <button 
+      onClick={() => setActiveTab('stats')}
+      className={`py-3 flex items-center justify-center space-x-1 border-b-2 ${activeTab === 'stats' ? 'border-emerald-400 text-emerald-400 bg-[#142b34]' : 'border-transparent text-gray-400'}`}
+    >
+      <BarChart2 size={14} />
+      <span>STATS</span>
+    </button>
+  </div>
+
+  {/* Tickets Content Section */}
+  <div className="flex-1 p-3 space-y-3 overflow-y-auto pb-28">
+    <div className="flex items-center justify-between text-xs text-gray-400 px-1">
+      <span>All 1234</span>
+      <span>My Tickets (3)</span>
+      <span>My Bets (3)</span>
+    </div>
+
+    {/* Ticket Item 3 */}
+    <div className="bg-[#12252e] rounded-xl p-3 border border-[#1c3844] space-y-2">
+      <div className="flex justify-between items-center text-xs">
+        <span className="font-bold text-gray-300">3 My Ticket</span>
+        <span className="text-yellow-500 font-semibold">Waiting</span>
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {[20, 30, 50, 68].map((n, i) => (
+          <div key={i} className="bg-emerald-600 text-white font-bold text-center py-1.5 rounded text-xs shadow">
+            {n}
           </div>
-        </section>
+        ))}
+      </div>
+      <div className="text-xs text-gray-400 pt-1 flex justify-between">
+        <span>Bet 1</span>
+      </div>
+    </div>
 
-        <section className="keno-grid" aria-label="Keno numbers 1 to 80">
-          {Array.from({ length: MAX_NUMBER }, (_, index) => {
-            const number = index + 1;
-            const hit = numberSet.has(number);
-            return (
-              <div key={number} className={`keno-cell ${hit ? "hit" : ""} ${currentNumber === number ? "latest" : ""}`}>
-                {[4, 27, 36, 48, 52, 60, 70, 74, 80].includes(number) && <span className="dot" />}
-                {number}
-              </div>
-            );
-          })}
-        </section>
+    {/* Ticket Item 2 */}
+    <div className="bg-[#12252e] rounded-xl p-3 border border-[#1c3844] space-y-2">
+      <div className="flex justify-between items-center text-xs">
+        <span className="font-bold text-gray-300">2 My Ticket</span>
+        <span className="text-yellow-500 font-semibold">Waiting</span>
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {[24, 34, 36, 17, 16].map((n, i) => (
+          <div key={i} className="bg-[#1c3642] text-gray-300 font-bold text-center py-1.5 rounded text-xs border border-[#284b5c]">
+            {n}
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-gray-400 pt-1 flex justify-between">
+        <span>Bet 1</span>
+      </div>
+    </div>
 
-        <div className="keno-controls">
-          <button onClick={nextRound}>{isDrawing ? "Restart round" : "Next round"}</button>
-          <button onClick={() => { setDrawnNumbers([]); setCurrentNumber(null); }}>Clear board</button>
-        </div>
-        <p className="keno-note">
-          Round {round} · {drawnNumbers.length}/{DRAW_COUNT} numbers drawn.
-          Demo animation only; production results should be generated and verified server-side.
-        </p>
-      </section>
-    </main>
-  );
-}
+    {/* Ticket Item 1 */}
+    <div className="bg-[#12252e] rounded-xl p-3 border border-[#1c3844] space-y-2">
+      <div className="flex justify-between items-center text-xs">
+        <span className="font-bold text-gray-300">1 My Ticket</span>
+        <span className="text-yellow-500 font-semibold">Waiting</span>
+      </div>
+      <div className="grid grid-cols-5 gap-1.5">
+        {[38, 57].map((n, i) => (
+          <div key={i} className="bg-[#1c3642] text-gray-300 font-bold text-center py-1.5 rounded text-xs border border-[#284b5c]">
+            {n}
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-gray-400 pt-1 flex justify-between">
+        <span>Bet 1</span>
+      </div>
+    </div>
+  </div>
 
-// Named exports make the draw logic easy to test separately.
-export { drawUniqueNumbers, secureRandomInt, DRAW_COUNT, MAX_NUMBER };
+  {/* Bottom Sticky Action Bar / Bet Controller */}
+  <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#0e1f26] border-t border-[#1b343e] p-3 shadow-2xl">
+    <div className="flex items-center space-x-2">
+      <div className="flex-1 bg-[#142933] border border-[#234756] rounded-xl flex items-center px-3 py-1.5 justify-between">
+        <button
+ onClick={() => setBetAmount(Math.max(1, betAmount - 1))}
+          className="text-gray-400 font-bold text-lg px-2 hover:text-white"
+        >
+          -
+        </button>
+        <span className="font-black text-base text-white">{betAmount}</span>
+        <button 
+          onClick={() => setBetAmount(betAmount + 1)}
+          className="text-gray-400 font-bold text-lg px-2 hover:text-white"
+        >
+          +
+        </button>
+      </div>
+      <button className="bg-[#142933] border border-[#234756] px-4 py-2 rounded-xl font-bold text-xs text-gray-300 hover:bg-[#1b343e]">
+        X2
+      </button>
+      <button 
+        onClick={() => setBetAmount(100)}
+        className="bg-[#142933] border border-[#234756] px-4 py-2 rounded-xl font-bold text-xs text-emerald-400 hover:bg-[#1b343e]"
+      >
+        MAX
+      </button>
+    </div>
+    
+    <button className="w-full mt-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-black py-3 rounded-xl tracking-wider text-sm shadow-lg shadow-emerald-900/50">
+      BET ACCEPTED
+    </button>
+  </div>
+
+</div>
+); }
