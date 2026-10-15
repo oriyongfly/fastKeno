@@ -17,18 +17,14 @@ import { formatCountdown } from '../../utils/formatters';
  */
 export default function TimerPill({ timer, className = '' }) {
   return (
-    <div
-      role="timer"
-      aria-live="polite"
-      aria-atomic="true"
-      className={[
-        'mx-auto mt-1 w-24 rounded-b-xl bg-emerald-950/60 py-0.5',
-        'text-center text-[11px] font-bold tabular-nums text-slate-200',
-        'shadow-[0_6px_14px_rgba(16,185,129,0.25)]',
-        className,
-      ].join(' ')}
-    >
-      {formatCountdown(timer)}
-    </div>
+<div
+  role="timer"
+  aria-live="polite"
+  aria-atomic="true"
+  className={`text-center text-4xl font-mono font-bold text-emerald-400 tracking-wider drop-shadow-[0_0_12px_rgba(52,211,153,0.8)] ${className}`}
+>
+  {formatCountdown(timer)}
+</div>
+
   );
 }

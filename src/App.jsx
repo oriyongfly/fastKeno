@@ -266,7 +266,6 @@ export default function App() {
                 player never loses sight of the clock. The timer hook is
                 `paused: isDrawing`, so it freezes (not resets) during the
                 draw and resumes when betting reopens. */}
-            <TimerPill timer={timer} />
 
             {/* Betting UI — hidden while a round is running.
                 Picks are locked anyway (toggleNumber early-returns when
@@ -274,6 +273,7 @@ export default function App() {
                 only the visuals. */}
             {!isDrawing && (
               <>
+                <TimerPill timer={timer} />
                 {/* Hint panel: choose ↔ pay-table slide */}
                 <InfoPanels
                   picks={selectedNumbers}

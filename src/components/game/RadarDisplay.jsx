@@ -36,14 +36,15 @@ const slot = (i) => ({
 // ── Ball backgrounds ───────────────────────────────────────────
 // Two variants, used by both CenterBall and TrayBall so the swap
 // from flying → landed is colour-identical for a given hit state.
-const BG_DARK  = 'radial-gradient(circle at 35% 22%, #607985, #15252e 68%)';
-const BG_HIT   = 'radial-gradient(circle at 35% 22%, #34d399, #059669 68%)';
+const BG_DARK = 'radial-gradient(circle at 35% 22%, #607985, #15252e 68%)';
+const BG_HIT  = 'radial-gradient(circle at 35% 22%, #34d399, #059669 68%)';
 
 /**
  * Radar screen.
  *
- * Idle:   countdown clock (HH:MM)
- * Drawing / settled:
+ * Renders nothing unless a draw is in progress or there are drawn
+ * numbers to show. When it does render:
+ *
  *   - Fixed 208px stage with rotating arc rings + teal glow backdrop
  *   - Ball-count indicator (XX / 20) in the top-right
  *   - Large center ball for the most recently revealed number, which
@@ -58,7 +59,7 @@ const BG_HIT   = 'radial-gradient(circle at 35% 22%, #34d399, #059669 68%)';
  *
  * @param {Object}   props
  * @param {boolean}  props.isDrawing
- * @param {number}   props.timer              - seconds remaining
+ * @param {number}   props.timer              - seconds remaining (unused)
  * @param {number[]} props.drawnNumbers       - numbers revealed so far
  * @param {number[]} [props.pickedNumbers=[]] - numbers on active tickets
  * @param {string}   [props.className]
@@ -90,24 +91,24 @@ export default function RadarDisplay({
   const drawComplete = totalDrawn >= NUMBERS_DRAWN && !isDrawing;
   const showTryAgain = useDelayedFlag(drawComplete, TRY_AGAIN_DELAY_MS);
 
+  // Nothing to show — collapse entirely. The parent's
+  // `{!isDrawing && …}` already hides the betting UI during a draw,
+  // so an idle RadarDisplay is pure dead space.
+  if (!showDrawView) return null;
+
   return (
     <div
       className={`relative h-[208px] bg-[#090d16] rounded-xl border border-slate-800 overflow-hidden shadow-inner ${className}`}
     >
       <StageBackdrop />
-
-      {showDrawView ? (
-        <DrawStage
-          currentNumber={currentNumber}
-          currentPhase={phase}
-          landedNumbers={landedNumbers}
-          totalDrawn={totalDrawn}
-          showTryAgain={showTryAgain}
-          pickedSet={pickedSet}
-        />
-      ) : (
-        <ClockView timer={timer} />
-      )}
+      <DrawStage
+        currentNumber={currentNumber}
+        currentPhase={phase}
+        landedNumbers={landedNumbers}
+        totalDrawn={totalDrawn}
+        showTryAgain={showTryAgain}
+        pickedSet={pickedSet}
+      />
     </div>
   );
 }
@@ -186,19 +187,6 @@ function StageBackdrop() {
 /* ─────────────────────────────────────────────
    Views
    ───────────────────────────────────────────── */
-
-function ClockView({ timer }) {
-  return (
-    <div
-      className="relative z-10 h-full grid place-items-center font-mono font-bold text-4xl text-emerald-400 tracking-wider drop-shadow-[0_0_12px_rgba(52,211,153,0.8)]"
-      role="timer"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      {formatCountdown(timer)}
-    </div>
-  );
-}
 
 function DrawStage({
   currentNumber,
