@@ -1,13 +1,22 @@
 // components/game/RadarDisplay.jsx
 
 import React from 'react';
-import { NUMBERS_DRAWN } from '../../constants/gameConfig';
 import { formatCountdown } from '../../utils/formatters';
 
+// How many recent balls the strip shows. Fixed so empty slots can
+// pad the row on the first few reveals.
+const RECENT_SLOTS = 9;
+
 /**
- * Radar screen: countdown clock when idle, live reveal grid when drawing.
+ * Radar screen.
  *
- * Stateless. Parent decides *when* to flip `isDrawing`.
+ * Idle:   countdown clock (HH:MM)
+ * Drawing / settled:
+ *   - Large "current number" ball (last drawn)
+ *   - 9-slot strip of the most recent numbers, newest first
+ *
+ * All state is derived from `drawnNumbers` — no internal hooks,
+ * no timers, no side effects. Safe on an empty array.
  *
  * @param {Object}   props
  * @param {boolean}  props.isDrawing
@@ -21,8 +30,20 @@ export default function RadarDisplay({
   drawnNumbers = [],
   className = '',
 }) {
-  const revealed = drawnNumbers.length;
-  const total = NUMBERS_DRAWN;
+  const showDrawView = isDrawing || drawnNumbers.length > 0;
+
+  // Derived values. Both are null / empty-safe.
+  const currentNumber =
+    Array.isArray(drawnNumbers) && drawnNumbers.length > 0
+      ? drawnNumbers[drawnNumbers.length - 1]
+      : null;
+
+  const recentNumbers =
+    Array.isArray(drawnNumbers) && drawnNumbers.length > 0
+      ? drawnNumbers.slice(-RECENT_SLOTS).reverse()
+      : [];
+
+  const emptySlots = Math.max(0, RECENT_SLOTS - recentNumbers.length);
 
   return (
     <div
@@ -30,8 +51,12 @@ export default function RadarDisplay({
     >
       <RadarRings />
 
-      {isDrawing ? (
-        <DrawView drawnNumbers={drawnNumbers} revealed={revealed} total={total} />
+      {showDrawView ? (
+        <DrawStage
+          currentNumber={currentNumber}
+          recentNumbers={recentNumbers}
+          emptySlots={emptySlots}
+        />
       ) : (
         <ClockView timer={timer} />
       )}
@@ -40,7 +65,7 @@ export default function RadarDisplay({
 }
 
 /* ─────────────────────────────────────────────
-   Sub-views (module-private — not exported)
+   Sub-views
    ───────────────────────────────────────────── */
 
 function RadarRings() {
@@ -73,48 +98,71 @@ function ClockView({ timer }) {
   );
 }
 
-function DrawView({ drawnNumbers, revealed, total }) {
+function DrawStage({ currentNumber, recentNumbers, emptySlots }) {
   return (
-    <div className="z-10 w-full px-3 flex flex-col items-center">
-      {/* Status line + count badge */}
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-xs font-semibold text-emerald-400 animate-pulse">
-          DRAWING NUMBERS
-        </span>
-        <span className="text-[10px] font-mono font-bold text-slate-950 bg-emerald-500 rounded-full px-1.5 py-0.5 tabular-nums">
-          {revealed}/{total}
-        </span>
-      </div>
-
-      {/*
-        Capped, scrollable reveal area.
-        - grid-cols-10 matches the main board for visual consistency
-        - max-h keeps the radar panel fixed height so the layout below
-          never shifts during a draw
-        - overflow-y-auto + custom scrollbar fallback
-      */}
-      <div
-        className="w-full max-h-[88px] overflow-y-auto no-scrollbar"
-        role="list"
-        aria-label="Drawn numbers"
-      >
-        <div className="grid grid-cols-10 gap-1 p-0.5">
-          {drawnNumbers.map((num, i) => (
-            <DrawnBall key={`${num}-${i}`} num={num} />
-          ))}
+    <div className="relative z-10 w-full h-full">
+      {/* Current number — large ball, right-center */}
+      {currentNumber !== null && (
+        <div
+          className="absolute right-[21%] top-[30px] w-[60px] h-[60px] rounded-full grid place-items-center border-2 border-slate-500/70 text-slate-50 text-3xl font-extrabold tabular-nums"
+          style={{
+            background:
+              'radial-gradient(circle at 35% 22%, #607985, #15252e 68%)',
+            boxShadow:
+              'inset 0 3px 5px rgba(255,255,255,0.17), 0 4px 8px rgba(0,0,0,0.4)',
+          }}
+          aria-label={`Current number ${currentNumber}`}
+        >
+          {currentNumber}
         </div>
+      )}
+
+      {/* 9-slot recent strip — pinned to the bottom of the stage */}
+      <div className="absolute inset-x-0 bottom-5 flex items-center justify-center gap-[clamp(6px,2vw,20px)]">
+        {recentNumbers.map((num, index) => (
+          <RecentBall key={`${num}-${index}`} num={num} latest={index === 0} />
+        ))}
+        {Array.from({ length: emptySlots }, (_, index) => (
+          <EmptyBall key={`empty-${index}`} />
+        ))}
       </div>
     </div>
   );
 }
 
-function DrawnBall({ num }) {
+function RecentBall({ num, latest }) {
   return (
     <span
-      role="listitem"
-      className="w-7 h-7 bg-emerald-500 text-slate-950 font-bold text-xs rounded-full flex items-center justify-center shadow-md shadow-emerald-500/40 animate-scale tabular-nums"
+      className={`shrink-0 w-9 h-9 rounded-full grid place-items-center text-slate-50 text-lg font-extrabold border-2 tabular-nums transition-transform duration-150 ${
+        latest ? '-translate-y-0.5' : ''
+      }`}
+      style={{
+        background:
+          'radial-gradient(circle at 35% 20%, #47dfaa, #006e4e 65%, #033d32)',
+        borderColor: '#368a6d',
+        boxShadow:
+          'inset 0 2px 3px rgba(255,255,255,0.14), 0 2px 3px rgba(0,0,0,0.4)',
+      }}
     >
       {num}
+    </span>
+  );
+}
+
+function EmptyBall() {
+  return (
+    <span
+      className="shrink-0 w-9 h-9 rounded-full grid place-items-center text-slate-400/70 text-lg font-extrabold border-2"
+      style={{
+        background:
+          'radial-gradient(circle at 35% 22%, #425f6b, #0b1720 65%)',
+        borderColor: '#4b646c',
+        boxShadow:
+          'inset 0 2px 3px rgba(255,255,255,0.14), 0 2px 3px rgba(0,0,0,0.4)',
+      }}
+      aria-hidden="true"
+    >
+      –
     </span>
   );
 }

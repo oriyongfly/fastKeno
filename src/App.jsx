@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 // ── Config ─────────────────────────────────────
-import { NUMBERS_DRAWN, DRAW_ANIMATION_MS } from './constants/gameConfig';
+import { NUMBERS_DRAWN, DRAW_ANIMATION_MS, GRID_SIZE, MAX_PICKS } from './constants/gameConfig';
 
 // ── Store ──────────────────────────────────────
 import { useGameStore } from './store/useGameStore';
@@ -37,9 +37,6 @@ import LeadersTab from './components/tabs/LeadersTab';
 // ── UI ─────────────────────────────────────────
 import Toast from './components/ui/Toast';
 
-// ── Constants ──────────────────────────────────
-import { MAX_PICKS } from './constants/gameConfig';
-
 /**
  * App shell.
  *
@@ -58,16 +55,16 @@ export default function App() {
   const gameHistory     = useGameStore((s) => s.gameHistory);
 
   // ── Store actions ──────────────────────────
-  const toggleNumber    = useGameStore((s) => s.toggleNumber);
-  const autoPick        = useGameStore((s) => s.autoPick);
-  const clearPicks      = useGameStore((s) => s.clearPicks);
-  const changeBet       = useGameStore((s) => s.changeBet);
-  const multiplyBet     = useGameStore((s) => s.multiplyBet);
-  const maxBet          = useGameStore((s) => s.maxBet);
-  const placeBet        = useGameStore((s) => s.placeBet);
-  const startDraw       = useGameStore((s) => s.startDraw);
-  const revealNumber    = useGameStore((s) => s.revealNumber);
-  const finishDraw      = useGameStore((s) => s.finishDraw);
+  const toggleNumber     = useGameStore((s) => s.toggleNumber);
+  const autoPick         = useGameStore((s) => s.autoPick);
+  const clearPicks       = useGameStore((s) => s.clearPicks);
+  const changeBet        = useGameStore((s) => s.changeBet);
+  const multiplyBet      = useGameStore((s) => s.multiplyBet);
+  const maxBet           = useGameStore((s) => s.maxBet);
+  const placeBet         = useGameStore((s) => s.placeBet);
+  const startDraw        = useGameStore((s) => s.startDraw);
+  const revealNumber     = useGameStore((s) => s.revealNumber);
+  const finishDraw       = useGameStore((s) => s.finishDraw);
   const registerNotifier = useGameStore((s) => s.registerNotifier);
 
   // ── Local UI state (not shared) ────────────
@@ -121,7 +118,7 @@ export default function App() {
   const runDraw = useCallback(() => {
     clearRevealTimers();
 
-    const drawn = drawNumbers(NUMBERS_DRAWN, 80);
+    const drawn = drawNumbers(NUMBERS_DRAWN, GRID_SIZE);
     startDraw();
 
     drawn.forEach((num, i) => {
@@ -183,6 +180,12 @@ export default function App() {
     if (ok) playSound(SFX.PLACE_BET);
   }, [placeBet, playSound]);
 
+  // ── Derived ────────────────────────────────
+  // The cell that should render with the "latest draw" inset ring.
+  // null before any draw, so NumberGrid receives a stable, safe value.
+  const latestNumber =
+    drawnNumbers.length > 0 ? drawnNumbers[drawnNumbers.length - 1] : null;
+
   // ── Render ─────────────────────────────────
   return (
     <div className="min-h-screen bg-[#0d131f] text-slate-100 flex justify-center font-sans select-none">
@@ -229,6 +232,7 @@ export default function App() {
           <NumberGrid
             selectedNumbers={selectedNumbers}
             drawnNumbers={drawnNumbers}
+            latestNumber={latestNumber}
             isDrawing={isDrawing}
             onNumberClick={handleNumberClick}
           />

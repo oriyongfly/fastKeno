@@ -17,7 +17,7 @@ export const MIN_PICKS = 1;           // Min numbers required to place a bet
 // ─────────────────────────────────────────────
 export const NUMBERS_DRAWN = 20;      // Keno draws 20 of 80
 export const DRAW_INTERVAL_SECONDS = 60; // Round length
-export const DRAW_ANIMATION_MS = 150;    // Delay between each revealed ball
+export const DRAW_ANIMATION_MS = 2000;    // Delay between each revealed ball
 
 // ─────────────────────────────────────────────
 // Betting

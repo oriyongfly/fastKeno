@@ -7,9 +7,9 @@ import { GRID_SIZE } from '../../constants/gameConfig';
  * The 80-number Keno board.
  *
  * Priority order (highest first):
- *   1. hit      — selected AND drawn   → yellow, glow, slight scale
- *   2. selected — picked, not drawn    → white, glow
- *   3. drawn    — drawn, not picked    → emerald
+ *   1. hit      — selected AND drawn   → yellow glow (unchanged)
+ *   2. selected — picked, not drawn    → white glow
+ *   3. drawn    — drawn, not picked    → green gradient; latest gets inset ring
  *   4. default  — neither              → slate
  *
  * Stateless. Parent owns `onNumberClick`; this component just forwards
@@ -18,6 +18,7 @@ import { GRID_SIZE } from '../../constants/gameConfig';
  * @param {Object}   props
  * @param {number[]} props.selectedNumbers
  * @param {number[]} props.drawnNumbers
+ * @param {number|null} [props.latestNumber]  - most recent draw; ring highlight
  * @param {boolean}  props.isDrawing
  * @param {Function} props.onNumberClick       - (num: number) => void
  * @param {number}   [props.gridSize=GRID_SIZE]
@@ -26,18 +27,17 @@ import { GRID_SIZE } from '../../constants/gameConfig';
 export default function NumberGrid({
   selectedNumbers = [],
   drawnNumbers = [],
+  latestNumber = null,
   isDrawing = false,
   onNumberClick,
   gridSize = GRID_SIZE,
   className = '',
 }) {
-  // O(1) membership checks. Sets are rebuilt only when the arrays
-  // actually change identity, which is exactly what the parent gives us
-  // (new array per update, stable reference otherwise).
+  // O(1) membership checks.
   const selectedSet = useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
   const drawnSet = useMemo(() => new Set(drawnNumbers), [drawnNumbers]);
 
-  // Static range 1..gridSize — recomputed only if gridSize changes.
+  // Static range 1..gridSize.
   const numbers = useMemo(
     () => Array.from({ length: gridSize }, (_, i) => i + 1),
     [gridSize]
@@ -55,6 +55,7 @@ export default function NumberGrid({
           num={num}
           isSelected={selectedSet.has(num)}
           isDrawn={drawnSet.has(num)}
+          isLatest={latestNumber === num}
           disabled={isDrawing}
           onClick={onNumberClick}
         />
@@ -67,9 +68,10 @@ export default function NumberGrid({
    Cell
    ───────────────────────────────────────────── */
 
-function NumberCell({ num, isSelected, isDrawn, disabled, onClick }) {
+function NumberCell({ num, isSelected, isDrawn, isLatest, disabled, onClick }) {
   const isHit = isSelected && isDrawn;
   const style = getCellStyle({ isSelected, isDrawn });
+  const inlineStyle = getCellInlineStyle({ isSelected, isDrawn, isLatest });
 
   return (
     <button
@@ -78,10 +80,11 @@ function NumberCell({ num, isSelected, isDrawn, disabled, onClick }) {
       onClick={() => onClick?.(num)}
       disabled={disabled}
       aria-pressed={isSelected}
-      aria-label={buildAriaLabel(num, isSelected, isDrawn)}
+      aria-label={buildAriaLabel(num, isSelected, isDrawn, isLatest)}
       className={`h-8 rounded text-xs font-semibold flex items-center justify-center transition-all duration-150 border tabular-nums ${style} ${
         isHit ? 'z-10' : ''
       }`}
+      style={inlineStyle}
     >
       {num}
     </button>
@@ -89,23 +92,26 @@ function NumberCell({ num, isSelected, isDrawn, disabled, onClick }) {
 }
 
 /* ─────────────────────────────────────────────
-   Style resolver — the priority-order rule lives here, not in JSX
+   Style resolver — Tailwind classes
    ───────────────────────────────────────────── */
 
 /**
  * Returns the Tailwind class string for a cell's visual state.
  *
  * Priority (checked top-down, first match wins):
- *   1. hit
- *   2. selected
- *   3. drawn
- *   4. default
+ *   1. hit      → yellow (unchanged; overrides latest)
+ *   2. selected → white
+ *   3. drawn    → green gradient base classes (visual via inline style)
+ *   4. default  → slate
+ *
+ * `isLatest` only affects the drawn case, and only via inline style —
+ * it does not change the class string here.
  *
  * @param {{ isSelected: boolean, isDrawn: boolean }} state
  * @returns {string}
  */
 export function getCellStyle({ isSelected, isDrawn }) {
-  // 1. HIT — highest priority
+  // 1. HIT — highest priority, unchanged
   if (isSelected && isDrawn) {
     return 'bg-yellow-400 text-slate-950 font-black border-yellow-300 shadow-[0_0_10px_rgba(250,204,21,0.8)] scale-105';
   }
@@ -115,9 +121,9 @@ export function getCellStyle({ isSelected, isDrawn }) {
     return 'bg-slate-100 text-slate-900 font-extrabold border-white shadow-[0_0_8px_rgba(255,255,255,0.6)]';
   }
 
-  // 3. DRAWN
+  // 3. DRAWN — base classes only; gradient + ring come from inline style
   if (isDrawn) {
-    return 'bg-emerald-600/80 text-white font-bold border-emerald-400/50';
+    return 'text-slate-100 font-bold border-transparent';
   }
 
   // 4. DEFAULT
@@ -125,12 +131,48 @@ export function getCellStyle({ isSelected, isDrawn }) {
 }
 
 /* ─────────────────────────────────────────────
+   Style resolver — inline (gradient + ring)
+   ───────────────────────────────────────────── */
+
+/**
+ * Inline style for gradients and the latest-ring box-shadow. Tailwind
+ * can't express `linear-gradient(...)` cleanly without a config entry,
+ * so we compute it here.
+ *
+ * Only applies to the drawn (non-selected) case. Hit and selected
+ * styles come entirely from Tailwind classes.
+ *
+ * @param {{ isSelected: boolean, isDrawn: boolean, isLatest?: boolean }} state
+ * @returns {React.CSSProperties | undefined}
+ */
+function getCellInlineStyle({ isSelected, isDrawn, isLatest }) {
+  // Hit wins — no inline style, Tailwind handles it.
+  if (isSelected && isDrawn) return undefined;
+
+  // Selected — no inline style.
+  if (isSelected) return undefined;
+
+  // Drawn — green gradient, plus ring if latest.
+  if (isDrawn) {
+    const ring = isLatest ? 'inset 0 0 0 2px #78d6a0' : null;
+    return {
+      background: 'linear-gradient(145deg, #438d65, #2f6b4d)',
+      boxShadow: ring ?? undefined,
+    };
+  }
+
+  // Default — no inline style.
+  return undefined;
+}
+
+/* ─────────────────────────────────────────────
    A11y helper
    ───────────────────────────────────────────── */
 
-function buildAriaLabel(num, isSelected, isDrawn) {
+function buildAriaLabel(num, isSelected, isDrawn, isLatest) {
   const tags = [];
   if (isSelected) tags.push('selected');
   if (isDrawn) tags.push('drawn');
+  if (isLatest && !isSelected) tags.push('latest');
   return tags.length ? `${num}, ${tags.join(', ')}` : `${num}`;
 }
