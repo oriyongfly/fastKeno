@@ -13,7 +13,7 @@ const MAX_BALLS = 20;
 //   fly   : move to tray slot & shrink to 0.4 (350ms ease-in)
 const T = { enter: 300, hold: 350, fly: 350 };
 
-// Delay before "TRY AGAIN" fades in after the last ball lands.
+// Delay before the result banner fades in after the last ball lands.
 const TRY_AGAIN_DELAY_MS = 300;
 
 // ── Stage geometry ─────────────────────────────────────────────
@@ -51,7 +51,8 @@ const BG_HIT  = 'radial-gradient(circle at 35% 22%, #34d399, #059669 68%)';
  *     pops in at the stage center and flies to its exact tray slot
  *   - Fixed two-row tray of landed balls (up to 20)
  *   - Balls light up green when their number was on an active ticket
- *   - "TRY AGAIN" banner fades in after the final ball lands
+ *   - Result banner ("YOU WIN" + payout, or "TRY AGAIN") fades in
+ *     after the final ball lands, while the round is settling
  *
  * The flying ball is keyed on the draw count, so each new number gets
  * a fresh DOM node and the `enter` phase runs from scratch — mirroring
@@ -62,6 +63,8 @@ const BG_HIT  = 'radial-gradient(circle at 35% 22%, #34d399, #059669 68%)';
  * @param {number}   props.timer              - seconds remaining (unused)
  * @param {number[]} props.drawnNumbers       - numbers revealed so far
  * @param {number[]} [props.pickedNumbers=[]] - numbers on active tickets
+ * @param {number}   [props.totalPayout=0]    - payout from the last draw
+ * @param {string}   [props.drawPhase]        - 'betting' | 'drawing' | 'settling'
  * @param {string}   [props.className]
  */
 export default function RadarDisplay({
@@ -69,6 +72,8 @@ export default function RadarDisplay({
   timer,
   drawnNumbers = [],
   pickedNumbers = [],
+  totalPayout = 0,
+  drawPhase,
   className = '',
 }) {
   const totalDrawn = Array.isArray(drawnNumbers) ? drawnNumbers.length : 0;
@@ -87,13 +92,16 @@ export default function RadarDisplay({
   // Per-ball phase for the center ball, keyed off length changes.
   const phase = useDrawBallPhase(totalDrawn);
 
-  // "TRY AGAIN" banner: shown 300ms after the last ball lands.
-  const drawComplete = totalDrawn >= NUMBERS_DRAWN && !isDrawing;
-  const showTryAgain = useDelayedFlag(drawComplete, TRY_AGAIN_DELAY_MS);
+  // Result banner: shown 300ms after the last ball lands, but ONLY
+  // during the settling phase. Once commitResults fires and drawPhase
+  // flips back to 'betting', the banner disappears immediately.
+  const drawComplete =
+    totalDrawn >= NUMBERS_DRAWN && drawPhase === 'settling';
+  const showResult = useDelayedFlag(drawComplete, TRY_AGAIN_DELAY_MS);
 
   // Nothing to show — collapse entirely. The parent's
-  // `{!isDrawing && …}` already hides the betting UI during a draw,
-  // so an idle RadarDisplay is pure dead space.
+  // `drawPhase === 'betting'` gate already hides the betting UI during
+  // a draw, so an idle RadarDisplay is pure dead space.
   if (!showDrawView) return null;
 
   return (
@@ -106,7 +114,8 @@ export default function RadarDisplay({
         currentPhase={phase}
         landedNumbers={landedNumbers}
         totalDrawn={totalDrawn}
-        showTryAgain={showTryAgain}
+        showResult={showResult}
+        totalPayout={totalPayout}
         pickedSet={pickedSet}
       />
     </div>
@@ -193,7 +202,8 @@ function DrawStage({
   currentPhase,
   landedNumbers,
   totalDrawn,
-  showTryAgain,
+  showResult,
+  totalPayout,
   pickedSet,
 }) {
   return (
@@ -207,8 +217,8 @@ function DrawStage({
         <span className="text-emerald-400">/</span> {NUMBERS_DRAWN}
       </div>
 
-      {/* "TRY AGAIN" overlay */}
-      <TryAgainBanner show={showTryAgain} />
+      {/* Result banner — "YOU WIN" + payout, or "TRY AGAIN" */}
+      <DrawResultBanner show={showResult} totalPayout={totalPayout} />
 
       {/* Landed tray balls — absolute slots, one per index. */}
       {landedNumbers.map((num, i) => (
@@ -337,21 +347,45 @@ function TrayBall({ num, index, hit = false }) {
 }
 
 /* ─────────────────────────────────────────────
-   TRY AGAIN banner
+   Result banner
    ───────────────────────────────────────────── */
 
-function TryAgainBanner({ show }) {
+/**
+ * Shown after the last ball lands, during the settling phase.
+ *
+ *   - Win  (totalPayout > 0): "YOU WIN" headline + payout amount
+ *   - Lose (totalPayout === 0, or undefined): "TRY AGAIN"
+ *
+ * Because the parent gates `show` on `drawPhase === 'settling'`, the
+ * banner vanishes the instant `commitResults` flips the phase back to
+ * 'betting'.
+ */
+function DrawResultBanner({ show, totalPayout = 0 }) {
+  const won = totalPayout > 0;
+
   return (
     <div
       className={[
-        'pointer-events-none absolute inset-x-0 top-6 z-20 text-center',
-        'text-4xl font-extrabold tracking-tight text-emerald-400',
+        'pointer-events-none absolute inset-x-0 top-6 z-20 flex flex-col items-center justify-center text-center',
         'transition-opacity duration-200 ease-out motion-reduce:transition-none',
         show ? 'opacity-100' : 'opacity-0',
       ].join(' ')}
       aria-live="polite"
     >
-      TRY AGAIN
+      {won ? (
+        <>
+          <span className="text-[39px] font-extrabold tracking-tight text-white leading-none">
+            YOU WIN
+          </span>
+          <span className="text-[58px] font-extrabold tabular-nums text-[#59d995] leading-none">
+            {totalPayout.toFixed(2)}
+          </span>
+        </>
+      ) : (
+        <span className="text-4xl font-extrabold tracking-tight text-emerald-400">
+          TRY AGAIN
+        </span>
+      )}
     </div>
   );
 }

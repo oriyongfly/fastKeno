@@ -18,6 +18,10 @@ import { formatTime, formatETB } from '../utils/formatters';
 export const BET_WAIT_MS = 450;
 export const BET_ACCEPTED_MS = 600;
 
+// How long the settlement / results phase stays on screen before
+// `commitResults` fires and the round is finalized (ms).
+export const SETTLE_DISPLAY_MS = 5000;
+
 export const useGameStore = create((set, get) => ({
   // ─────────────────────────────────────────────
   // State
@@ -33,6 +37,11 @@ export const useGameStore = create((set, get) => ({
 
   // Three-phase BET button feedback: "idle" | "wait" | "accepted"
   betState: 'idle',
+
+  // ── Settlement preview state ─────────────────
+  isSettling: false,
+  lastSettledTickets: [],
+  lastTotalPayout: 0,
 
   // Optional: a notify function the UI can register so actions can
   // surface messages (toasts) without importing React.
@@ -187,18 +196,40 @@ export const useGameStore = create((set, get) => ({
   // ─────────────────────────────────────────────
   // Draw / settle
   // ─────────────────────────────────────────────
-  startDraw: () => set({ isDrawing: true, drawnNumbers: [] }),
+  startDraw: () => set({
+    isDrawing: true,
+    drawnNumbers: [],
+    lastSettledTickets: [],
+    lastTotalPayout: 0,
+    isSettling: false,
+  }),
 
   revealNumber: (num) => {
     set((state) => ({ drawnNumbers: [...state.drawnNumbers, num] }));
   },
 
-  finishDraw: () => {
-    const { drawnNumbers, activeTickets, balance, gameHistory, _notify } = get();
+  /**
+   * Compute settlement results without touching balance, activeTickets,
+   * or gameHistory. Stores enriched tickets in `lastSettledTickets` and
+   * total payout in `lastTotalPayout`, then flips `isSettling` to true
+   * so the UI can reveal results before committing them.
+   *
+   * If there are no active tickets, skips straight to idle.
+   *
+   * @returns {{ ok: boolean, totalPayout: number, settled: number }}
+   */
+  previewResults: () => {
+    const { drawnNumbers, activeTickets } = get();
 
-    // No-op if nothing to settle
+    // No-op if nothing to settle — go straight to idle.
     if (activeTickets.length === 0) {
-      set({ isDrawing: false, timer: DRAW_INTERVAL_SECONDS });
+      set({
+        isDrawing: false,
+        isSettling: false,
+        timer: DRAW_INTERVAL_SECONDS,
+        lastSettledTickets: [],
+        lastTotalPayout: 0,
+      });
       return { ok: false, totalPayout: 0, settled: 0 };
     }
 
@@ -211,19 +242,85 @@ export const useGameStore = create((set, get) => ({
       status: r.won ? `Won ${formatETB(r.payout)}` : 'Lost',
     }));
 
-    if (totalPayout > 0) {
-      _notify?.(`🎉 Congratulations! You won ${formatETB(totalPayout)}!`);
-    }
-
     set({
       isDrawing: false,
-      timer: DRAW_INTERVAL_SECONDS,
-      balance: balance + totalPayout,
-      activeTickets: [],
-      gameHistory: [...settledTickets, ...gameHistory],
+      isSettling: true,
+      lastSettledTickets: settledTickets,
+      lastTotalPayout: totalPayout,
     });
 
     return { ok: true, totalPayout, settled: settledTickets.length };
+  },
+
+  /**
+   * Commit the previously previewed settlement: credit balance, move
+   * tickets to history, clear the round, and return to idle.
+   *
+   * Guarded — if `isSettling` is false (e.g. double-fire), this is a
+   * no-op so balance/history are never mutated twice.
+   *
+   * @returns {{ ok: boolean, totalPayout: number, settled: number }}
+   */
+  commitResults: () => {
+    const {
+      isSettling,
+      lastSettledTickets,
+      lastTotalPayout,
+      balance,
+      gameHistory,
+      _notify,
+    } = get();
+
+    // Guard against double-fire or calling before preview.
+    if (!isSettling) {
+      return { ok: false, totalPayout: 0, settled: 0 };
+    }
+
+    if (lastTotalPayout > 0) {
+      _notify?.(`🎉 Congratulations! You won ${formatETB(lastTotalPayout)}!`);
+    }
+
+    set({
+      balance: balance + lastTotalPayout,
+      gameHistory: [...lastSettledTickets, ...gameHistory],
+      activeTickets: [],
+      drawnNumbers: [],
+      isSettling: false,
+      lastSettledTickets: [],
+      lastTotalPayout: 0,
+    });
+
+    return {
+      ok: true,
+      totalPayout: lastTotalPayout,
+      settled: lastSettledTickets.length,
+    };
+  },
+
+  /**
+   * One-shot settlement: preview now, commit after SETTLE_DISPLAY_MS.
+   *
+   * Combines `previewResults` + a delayed `commitResults` so callers
+   * that don't need to manage the timer themselves (e.g. the App's
+   * runDraw timeout chain) can fire a single action.
+   *
+   * The commit is self-guarded by `commitResults` (no-op if
+   * `isSettling` is already false), so a stray timeout after a manual
+   * reset can't double-credit the balance. If you need to cancel a
+   * pending commit explicitly (e.g. on unmount), keep the timer id —
+   * `runSettle` returns the preview result, not the timer id, so
+   * callers that need cancellation should use `previewResults` +
+   * their own `setTimeout` instead.
+   *
+   * @returns {{ ok: boolean, totalPayout: number, settled: number }}
+   *          — the preview result (immediate), not the commit result.
+   */
+  runSettle: () => {
+    const result = get().previewResults();
+    setTimeout(() => {
+      get().commitResults();
+    }, SETTLE_DISPLAY_MS);
+    return result;
   },
 
   // ─────────────────────────────────────────────
@@ -251,5 +348,8 @@ export const useGameStore = create((set, get) => ({
       gameHistory: [],
       timer: DRAW_INTERVAL_SECONDS,
       betState: 'idle',           // ← don't leave the button stuck
+      isSettling: false,
+      lastSettledTickets: [],
+      lastTotalPayout: 0,
     }),
 }));

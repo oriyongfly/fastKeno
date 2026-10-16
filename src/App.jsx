@@ -52,27 +52,30 @@ import ViewSwap from './components/ui/ViewSwap';
  * draw sequence, and renders the layout. All game rules live in the
  * store and utilities — this file is pure composition.
  *
- * Changes applied:
- *   1. betState read from store, passed to BetControls.
- *   3. NumberGrid receives hotNumbers / coldNumbers (empty for now).
- *   4. InfoPanels replaces PicksCounter.
- *   5. ViewSwap wraps the game area, keyed on `round`.
- *   6. `round` bumps inside runDraw, at draw start.
- *   7. TimerPill extracted, rendered between RadarDisplay and InfoPanels.
- *  12. InfoPanels + NumberGrid + BetControls hidden while isDrawing.
- *  14. pickedNumbers derived from activeTickets, passed to RadarDisplay
- *      so hit balls light up green in the draw stage.
+ * Draw lifecycle:
+ *   betting  → (timer hits 0) → drawing → (last reveal) → settling
+ *            → (SETTLE_DISPLAY_MS elapses) → betting
+ *
+ * `drawPhase` collapses the two boolean flags (isDrawing, isSettling)
+ * into a single discriminator the UI can switch on.
+ *
+ * Settlement is a single store call: `runSettle()` previews results
+ * immediately and schedules the commit 5 s later, all internally. The
+ * component only owns the reveal chain.
  */
 export default function App() {
   // ── Store slices ───────────────────────────
-  const balance         = useGameStore((s) => s.balance);
-  const selectedNumbers = useGameStore((s) => s.selectedNumbers);
-  const drawnNumbers    = useGameStore((s) => s.drawnNumbers);
-  const isDrawing       = useGameStore((s) => s.isDrawing);
-  const betAmount       = useGameStore((s) => s.betAmount);
-  const activeTickets   = useGameStore((s) => s.activeTickets);
-  const gameHistory     = useGameStore((s) => s.gameHistory);
-  const betState        = useGameStore((s) => s.betState);
+  const balance            = useGameStore((s) => s.balance);
+  const selectedNumbers    = useGameStore((s) => s.selectedNumbers);
+  const drawnNumbers       = useGameStore((s) => s.drawnNumbers);
+  const isDrawing          = useGameStore((s) => s.isDrawing);
+  const isSettling         = useGameStore((s) => s.isSettling);
+  const lastSettledTickets = useGameStore((s) => s.lastSettledTickets);
+  const lastTotalPayout    = useGameStore((s) => s.lastTotalPayout);
+  const betAmount          = useGameStore((s) => s.betAmount);
+  const activeTickets      = useGameStore((s) => s.activeTickets);
+  const gameHistory        = useGameStore((s) => s.gameHistory);
+  const betState           = useGameStore((s) => s.betState);
 
   // ── Store actions ──────────────────────────
   const toggleNumber     = useGameStore((s) => s.toggleNumber);
@@ -84,7 +87,7 @@ export default function App() {
   const placeBet         = useGameStore((s) => s.placeBet);
   const startDraw        = useGameStore((s) => s.startDraw);
   const revealNumber     = useGameStore((s) => s.revealNumber);
-  const finishDraw       = useGameStore((s) => s.finishDraw);
+  const runSettle        = useGameStore((s) => s.runSettle);
   const registerNotifier = useGameStore((s) => s.registerNotifier);
 
   // ── Local UI state (not shared) ────────────
@@ -126,7 +129,8 @@ export default function App() {
   // ── Draw sequence ──────────────────────────
   // Track reveal timeouts so they can be cleared if the component
   // unmounts mid-draw, or if a new round starts before the last
-  // reveal chain finishes.
+  // reveal chain finishes. Settlement's own delayed commit lives in
+  // the store (runSettle), and is self-guarded against double-fire.
   const revealTimersRef = useRef([]);
 
   const clearRevealTimers = useCallback(() => {
@@ -134,11 +138,12 @@ export default function App() {
     revealTimersRef.current = [];
   }, []);
 
-  useEffect(() => clearRevealTimers, [clearRevealTimers]);
+  useEffect(() => () => clearRevealTimers(), [clearRevealTimers]);
 
   /**
-   * Fires when the timer hits zero. Owns the reveal sequence and
-   * hands the final draw to `finishDraw` for settlement.
+   * Fires when the timer hits zero. Owns the reveal sequence and hands
+   * the final draw to `runSettle`, which previews results immediately
+   * (driving the settling UI) and schedules the commit internally.
    */
   const runDraw = useCallback(() => {
     clearRevealTimers();
@@ -156,7 +161,9 @@ export default function App() {
         playSound(SFX.DRAW_TICK);
 
         if (i === drawn.length - 1) {
-          const { totalPayout } = finishDraw();
+          // Preview results now (isSettling = true) and schedule the
+          // commit 5 s later — all inside the store action.
+          const { totalPayout } = runSettle();
 
           if (totalPayout > 0) playSound(SFX.WIN);
           else playSound(SFX.LOSE);
@@ -169,17 +176,27 @@ export default function App() {
     clearRevealTimers,
     startDraw,
     revealNumber,
-    finishDraw,
+    runSettle,
     playSound,
   ]);
+
+  // ── Draw phase ─────────────────────────────
+  // Collapses the two booleans into a single discriminator so the
+  // render logic and child components can branch cleanly.
+  const drawPhase = isDrawing
+    ? 'drawing'
+    : isSettling
+      ? 'settling'
+      : 'betting';
 
   // ── Timer ──────────────────────────────────
   const { timer } = useGameTimer({
     duration: DRAW_INTERVAL_SECONDS,
     onComplete: runDraw,
-    // Pause countdown while the reveal animation is running so every
-    // round gets a full 60 s of betting.
-    paused: isDrawing,
+    // Pause countdown while the reveal animation runs AND while the
+    // settlement results are on screen, so every round gets a full
+    // 60 s of betting.
+    paused: isDrawing || isSettling,
   });
 
   // ── Handlers ───────────────────────────────
@@ -255,23 +272,28 @@ export default function App() {
           {/* ── Game area: fades in on each new round ── */}
           <ViewSwap key={round}>
             {/* Radar / draw stage — always visible.
-                During the draw this is the whole show. */}
+                During the draw this is the whole show; during settling
+                it displays the results overlay (driven by `drawPhase`
+                and `totalPayout`). */}
             <RadarDisplay
               isDrawing={isDrawing}
               drawnNumbers={drawnNumbers}
               pickedNumbers={pickedNumbers}
+              drawPhase={drawPhase}
+              totalPayout={lastTotalPayout}
             />
 
             {/* Countdown pill — kept outside the draw-conditional so the
                 player never loses sight of the clock. The timer hook is
-                `paused: isDrawing`, so it freezes (not resets) during the
-                draw and resumes when betting reopens. */}
+                `paused: isDrawing || isSettling`, so it freezes (not
+                resets) during the draw AND the settle display, then
+                resumes when betting reopens. */}
 
-            {/* Betting UI — hidden while a round is running.
+            {/* Betting UI — shown only in the betting phase.
                 Picks are locked anyway (toggleNumber early-returns when
                 isDrawing), so hiding the grid doesn't change behaviour —
                 only the visuals. */}
-            {!isDrawing && (
+            {drawPhase === 'betting' && (
               <>
                 <TimerPill timer={timer} />
                 {/* Hint panel: choose ↔ pay-table slide */}
@@ -317,14 +339,15 @@ export default function App() {
               aria-labelledby={`tab-${activeTab}`}
               className="bg-[#101622] p-3 rounded-b-lg border-x border-b border-slate-800 min-h-[90px]"
             >
-          {activeTab === 'Game' && (
-            <GameTab
-              activeTickets={activeTickets}
-              gameHistory={gameHistory}
-              drawnNumbers={drawnNumbers}
-              isDrawing={isDrawing}
-            />
-
+              {activeTab === 'Game' && (
+                <GameTab
+                  activeTickets={activeTickets}
+                  gameHistory={gameHistory}
+                  drawnNumbers={drawnNumbers}
+                  isDrawing={isDrawing}
+                  settledTickets={lastSettledTickets}
+                  drawPhase={drawPhase}
+                />
               )}
               {activeTab === 'History' && (
                 <HistoryTab gameHistory={gameHistory} />
