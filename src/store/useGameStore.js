@@ -227,6 +227,7 @@ export const useGameStore = create((set, get) => ({
         isDrawing: false,
         isSettling: false,
         timer: DRAW_INTERVAL_SECONDS,
+        drawnNumbers: [],
         lastSettledTickets: [],
         lastTotalPayout: 0,
       });
@@ -309,8 +310,8 @@ export const useGameStore = create((set, get) => ({
    * reset can't double-credit the balance. If you need to cancel a
    * pending commit explicitly (e.g. on unmount), keep the timer id —
    * `runSettle` returns the preview result, not the timer id, so
-   * callers that need cancellation should use `previewResults` +
-   * their own `setTimeout` instead.
+   * callers that need cancellation should use `previewResults` + their
+   * own `setTimeout` instead.
    *
    * @returns {{ ok: boolean, totalPayout: number, settled: number }}
    *          — the preview result (immediate), not the commit result.

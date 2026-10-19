@@ -374,15 +374,15 @@ function DrawResultBanner({ show, totalPayout = 0 }) {
     >
       {won ? (
         <>
-          <span className="text-[39px] font-extrabold tracking-tight text-white leading-none">
+          <span className="text-[10px] font-extrabold tracking-tight text-white leading-none">
             YOU WIN
           </span>
-          <span className="text-[58px] font-extrabold tabular-nums text-[#59d995] leading-none">
+          <span className="text-[10px] font-extrabold tabular-nums text-[#59d995] leading-none">
             {totalPayout.toFixed(2)}
           </span>
         </>
       ) : (
-        <span className="text-4xl font-extrabold tracking-tight text-emerald-400">
+        <span className="text-[15px] font-extrabold tracking-tight text-emerald-400">
           TRY AGAIN
         </span>
       )}
